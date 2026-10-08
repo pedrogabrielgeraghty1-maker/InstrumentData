@@ -2,6 +2,9 @@ import Image from "next/image";
 
 import { deleteItemAction, fetchItems } from "@/app/actions";
 import ItemForm from "@/components/item-form";
+import { isDatabaseConfigured } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
 
 const formatter = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
@@ -10,6 +13,7 @@ const formatter = new Intl.DateTimeFormat("en-US", {
 
 export default async function Home() {
   const items = await fetchItems();
+  const needsVercelDatabase = process.env.VERCEL === "1" && !isDatabaseConfigured();
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
@@ -22,6 +26,13 @@ export default async function Home() {
             Instrument parts dashboard
           </h1>
         </header>
+
+        {needsVercelDatabase ? (
+          <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            Connect a PostgreSQL database to this Vercel project and redeploy to enable persistent records.
+            Add a Vercel Blob store as well to enable image uploads.
+          </div>
+        ) : null}
 
         <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
           <div className="xl:sticky xl:top-6 xl:self-start">

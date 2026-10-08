@@ -1,5 +1,4 @@
 import { createClient, sql, type QueryResult, type QueryResultRow } from "@vercel/postgres";
-import { createLocalItem, deleteLocalItem, getLocalItems } from "@/lib/local-db";
 
 type SqlValue = string | number | boolean | null | undefined;
 
@@ -48,7 +47,7 @@ export type ItemRecord = {
   created_at: string;
 };
 
-const isDatabaseConfigured = () => {
+export const isDatabaseConfigured = () => {
   const connectionString =
     process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_URL;
 
@@ -64,12 +63,42 @@ const isDatabaseConfigured = () => {
   }
 };
 
+const isVercelRuntime = () => process.env.VERCEL === "1";
+
+async function ensureItemsTable() {
+  await runQuery`
+    CREATE TABLE IF NOT EXISTS items (
+      id SERIAL PRIMARY KEY,
+      user_name TEXT NOT NULL,
+      instrument_name TEXT NOT NULL,
+      part_number TEXT NOT NULL,
+      serial_number TEXT NOT NULL UNIQUE,
+      photo_url TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await runQuery`
+    CREATE INDEX IF NOT EXISTS idx_items_created_at
+    ON items (created_at DESC)
+  `;
+}
+
+async function getLocalDatabase() {
+  return import("@/lib/local-db");
+}
+
 export async function getItems(): Promise<ItemRecord[]> {
   if (!isDatabaseConfigured()) {
+    if (isVercelRuntime()) {
+      return [];
+    }
+
+    const { getLocalItems } = await getLocalDatabase();
     return getLocalItems();
   }
 
   try {
+    await ensureItemsTable();
     const { rows } = await runQuery<ItemRecord>`
       SELECT id, user_name, instrument_name, part_number, serial_number, photo_url, created_at
       FROM items
@@ -91,6 +120,14 @@ export async function createItem(input: {
   photo_url?: string | null;
 }) {
   if (!isDatabaseConfigured()) {
+    if (isVercelRuntime()) {
+      return {
+        success: false,
+        message:
+          "Production storage is not configured. Add a PostgreSQL database to this Vercel project and redeploy.",
+      };
+    }
+
     const userName = input.user_name.trim();
     const instrumentName = input.instrument_name.trim();
     const partNumber = input.part_number.trim();
@@ -105,6 +142,7 @@ export async function createItem(input: {
     }
 
     try {
+      const { createLocalItem } = await getLocalDatabase();
       const item = createLocalItem({
         user_name: userName,
         instrument_name: instrumentName,
@@ -137,6 +175,7 @@ export async function createItem(input: {
   }
 
   try {
+    await ensureItemsTable();
     const { rows } = await runQuery<ItemRecord>`
       INSERT INTO items (user_name, instrument_name, part_number, serial_number, photo_url)
       VALUES (${userName}, ${instrumentName}, ${partNumber}, ${serialNumber}, ${photoUrl})
@@ -159,7 +198,16 @@ export async function createItem(input: {
 
 export async function deleteItem(id: number) {
   if (!isDatabaseConfigured()) {
+    if (isVercelRuntime()) {
+      return {
+        success: false,
+        message:
+          "Production storage is not configured. Add a PostgreSQL database to this Vercel project and redeploy.",
+      };
+    }
+
     try {
+      const { deleteLocalItem } = await getLocalDatabase();
       const deleted = deleteLocalItem(id);
       return deleted
         ? { success: true }
@@ -174,6 +222,7 @@ export async function deleteItem(id: number) {
   }
 
   try {
+    await ensureItemsTable();
     await runQuery`
       DELETE FROM items
       WHERE id = ${id}

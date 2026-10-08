@@ -6,7 +6,10 @@ export async function POST(request: Request) {
 
   if (!blobToken) {
     return NextResponse.json(
-      { error: "BLOB_READ_WRITE_TOKEN is not configured." },
+      {
+        error:
+          "Image storage is not configured for this deployment. In Vercel, create or connect a Blob store to this project, then redeploy.",
+      },
       { status: 500 }
     );
   }
