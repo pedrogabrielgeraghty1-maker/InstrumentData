@@ -35,7 +35,8 @@ export default function ItemForm() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const fileInput = event.currentTarget.elements.namedItem("photo") as HTMLInputElement | null;
+    const formElement = event.currentTarget;
+    const fileInput = formElement.elements.namedItem("photo") as HTMLInputElement | null;
     const file = fileInput?.files?.[0];
 
     if (!file) {
@@ -78,7 +79,7 @@ export default function ItemForm() {
 
       setSuccess("Part recorded successfully.");
       setFormValues(initialForm);
-      event.currentTarget.reset();
+      formElement.reset();
       setSelectedFileName("No file selected");
       router.refresh();
     } catch (uploadError) {
