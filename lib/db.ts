@@ -1,40 +1,61 @@
-import { createClient, sql, type QueryResult, type QueryResultRow } from "@vercel/postgres";
+import { defaultClientConfig, prismaPostgres } from "@prisma/ppg";
 
+type PostgresClient = ReturnType<typeof prismaPostgres>;
 type SqlValue = string | number | boolean | null | undefined;
 
-async function runQuery<T extends QueryResultRow>(
+let postgresClient: PostgresClient | undefined;
+
+function getConnectionString() {
+  const candidates = [
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_URL,
+    process.env.PRISMA_DATABASE_URL,
+    process.env.DATABASE_URL,
+  ];
+
+  return candidates.find((connectionString) => {
+    if (!connectionString) {
+      return false;
+    }
+
+    try {
+      const { hostname, password, username } = new URL(connectionString);
+      return !(
+        hostname === "host" &&
+        username === "username" &&
+        password === "password"
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function getPostgresClient() {
+  if (!postgresClient) {
+    const connectionString = getConnectionString();
+    if (!connectionString) {
+      throw new Error("A PostgreSQL connection string is not configured.");
+    }
+
+    postgresClient = prismaPostgres(defaultClientConfig(connectionString));
+  }
+
+  return postgresClient;
+}
+
+async function runQuery<T extends object>(
   strings: TemplateStringsArray,
   ...values: SqlValue[]
-): Promise<QueryResult<T>> {
-  const queryDirect = async (connectionString: string) => {
-    const client = createClient({ connectionString });
-    await client.connect();
-    try {
-      return await client.sql<T>(strings, ...values);
-    } finally {
-      await client.end();
-    }
-  }
+): Promise<T[]> {
+  return getPostgresClient().sql<T>(strings, ...values).collect();
+}
 
-  const directConnectionString = process.env.POSTGRES_URL_NON_POOLING;
-  if (directConnectionString) {
-    return queryDirect(directConnectionString);
-  }
-
-  try {
-    return await sql<T>(strings, ...values);
-  } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? error.code
-        : undefined;
-
-    if (code !== "invalid_connection_string" || !process.env.POSTGRES_URL) {
-      throw error;
-    }
-
-    return queryDirect(process.env.POSTGRES_URL);
-  }
+async function runCommand(
+  strings: TemplateStringsArray,
+  ...values: SqlValue[]
+) {
+  return getPostgresClient().sql.exec(strings, ...values);
 }
 
 export type ItemRecord = {
@@ -48,25 +69,13 @@ export type ItemRecord = {
 };
 
 export const isDatabaseConfigured = () => {
-  const connectionString =
-    process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_URL;
-
-  if (!connectionString) {
-    return false;
-  }
-
-  try {
-    const { hostname, password, username } = new URL(connectionString);
-    return !(hostname === "host" && username === "username" && password === "password");
-  } catch {
-    return false;
-  }
+  return Boolean(getConnectionString());
 };
 
 const isVercelRuntime = () => process.env.VERCEL === "1";
 
 async function ensureItemsTable() {
-  await runQuery`
+  await runCommand`
     CREATE TABLE IF NOT EXISTS items (
       id SERIAL PRIMARY KEY,
       user_name TEXT NOT NULL,
@@ -77,7 +86,7 @@ async function ensureItemsTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await runQuery`
+  await runCommand`
     CREATE INDEX IF NOT EXISTS idx_items_created_at
     ON items (created_at DESC)
   `;
@@ -99,7 +108,7 @@ export async function getItems(): Promise<ItemRecord[]> {
 
   try {
     await ensureItemsTable();
-    const { rows } = await runQuery<ItemRecord>`
+    const rows = await runQuery<ItemRecord>`
       SELECT id, user_name, instrument_name, part_number, serial_number, photo_url, created_at
       FROM items
       ORDER BY created_at DESC
@@ -176,7 +185,7 @@ export async function createItem(input: {
 
   try {
     await ensureItemsTable();
-    const { rows } = await runQuery<ItemRecord>`
+    const rows = await runQuery<ItemRecord>`
       INSERT INTO items (user_name, instrument_name, part_number, serial_number, photo_url)
       VALUES (${userName}, ${instrumentName}, ${partNumber}, ${serialNumber}, ${photoUrl})
       RETURNING id, user_name, instrument_name, part_number, serial_number, photo_url, created_at
@@ -223,7 +232,7 @@ export async function deleteItem(id: number) {
 
   try {
     await ensureItemsTable();
-    await runQuery`
+    await runCommand`
       DELETE FROM items
       WHERE id = ${id}
     `;
