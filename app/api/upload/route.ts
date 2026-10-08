@@ -15,7 +15,8 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
 
-    if (!(file instanceof File)) {
+    // Node 18 exposes File values from FormData without defining globalThis.File.
+    if (!file || typeof file === "string") {
       return NextResponse.json({ error: "No file was uploaded." }, { status: 400 });
     }
 
